@@ -1,0 +1,83 @@
+library(plyr)
+library(choroplethr)
+library(dplyr)
+library(readr)
+library(data.table)
+bridge = "https://www.fhwa.dot.gov/bridge/nbi/2013/delimited/AK13.txt"
+tmp = fread(bridge)
+tmp = as.tbl(tmp)
+classes = sapply(tmp, class)
+
+states= read_csv("http://pages.stat.wisc.edu/~karlrohe/classes/data/stateAbv.txt")
+states=states[-(1:12),]
+states[51,] = c("WashDC", "DC")
+states[52,] = c("Puerto Rico", "PR")
+dat=list()
+
+dest = rep("", 52)
+for(i in 1:52) dest[i]=paste("https://www.fhwa.dot.gov/bridge/nbi/2013/delimited/", states[i,2],"13.txt", sep = "") 
+x13 = ldply(dest, fread, colClasses = classes)
+
+M = x13
+is.na(M) %>% rowSums %>% hist ## == hist(rowSums(is.na(M)))
+is.na(M) %>% colSums %>% hist(breaks = 100)
+fun = function(x){ return(which(x>20)) }
+(bad =  is.na(M) %>% colSums %>% fun)
+M = M[,-bad]
+jold =1
+for(j in jold:ncol(M)){ #not reproducible
+  nc = nchar(M[,j], keepNA = T)
+  print(j)
+  print(summary(nc))
+  print(sum(is.na(nc)))
+  print("")
+}
+
+keep = c("STATE_CODE_001", "STRUCTURE_NUMBER_008" , "COUNTY_CODE_003", "LAT_016", "LONG_017", "TOLL_020" , "ADT_029"           ,      "YEAR_ADT_030" ,
+         "YEAR_BUILT_027" , "DECK_COND_058" , "SUPERSTRUCTURE_COND_059", "SUBSTRUCTURE_COND_060"  , "CHANNEL_COND_061","CULVERT_COND_062", "DATE_OF_INSPECT_090"   ,  "FRACTURE_092A"     ,      "UNDWATER_LOOK_SEE_092B" , "SPEC_INSPECT_092C"  )
+
+M = as.tbl(M)
+x = select(M, one_of(keep))
+
+ny = filter(x, STATE_CODE_001 == 36)
+
+library(ggplot2)
+ggplot(data = ny) +geom_point(mapping = aes(y = LAT_016, x = LONG_017))
+ny = filter(ny,LONG_017 > 6e+07)
+ggplot(data = ny) +geom_point(mapping = aes(y = LAT_016, x = LONG_017))
+
+min2dec = function(x){
+  substr(x,3,8) %>% return
+}
+hist(ny$LAT_016 %>% min2dec %>% as.numeric)
+
+min2dec = function(x){
+  as.numeric(substr(x,1,2)) + as.numeric(substr(x,3,8))/6e+05 %>% return
+}
+min2dec(ny$LAT_016[1])
+hist(ny$LAT_016 %>% min2dec %>% as.numeric)
+
+ny = mutate(ny,lat = min2dec(LAT_016), lon = min2dec(LONG_017))
+ggplot(data = ny) +geom_point(mapping = aes(y = lat, x = lon))
+
+ggplot(data = ny) +geom_point(mapping = aes(y = lat, x = lon,col =TOLL_020))
+ggplot(data = ny) +geom_point(mapping = aes(y = lat, x = lon,col =YEAR_BUILT_027))
+ggplot(data = ny, mapping = aes(y = log(ADT_029), x =YEAR_BUILT_027, col = TOLL_020)) +geom_point() + geom_smooth()
+ggplot(data = ny, mapping = aes(y = log(ADT_029), x =YEAR_BUILT_027, col = SUPERSTRUCTURE_COND_059)) +geom_point() + geom_smooth(method = "loess", span = .7)
+
+ny = mutate(ny, cond = pmin(SUPERSTRUCTURE_COND_059, SUBSTRUCTURE_COND_060, CHANNEL_COND_061,CULVERT_COND_062, na.rm = T))
+
+rateIt = function(cond){
+  # gives a good to fail rating for cond.
+  rate = rep("good", length(cond))
+  rate[cond<5] = "bad"
+  rate[cond <2]= "fail"
+  return(rate)
+}
+ny$rate = rateIt(ny$cond)
+table(ny$rate)
+ggplot(data = ny, mapping = aes(y = log(ADT_029), x =YEAR_BUILT_027, col = rate)) +geom_point() + geom_smooth()
+ggplot(data = ny, mapping = aes(y = lat, x = lon)) + 
+  geom_point(aes(col=rate))+ 
+  scale_colour_brewer(palette = "Spectral")  
+ggplot(data = ny, mapping = aes(x = rate, y = log(ADT_029))) + geom_boxplot()
